@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Board Game Resource Tracker</title>
+
+<style>
+  body {
+    font-family: Arial, sans-serif;
+    margin: 0;
+    padding: 15px;
+    background: #f5f5f5;
+  }
+
+  h1, h2 {
+    text-align: center;
+    margin-top: 10px;
+  }
+
+  .section {
+    background: white;
+    padding: 12px;
+    margin-bottom: 15px;
+    border-radius: 10px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  }
+
+  .resource-row, .income-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 6px 0;
+    align-items: center;
+  }
+
+  button {
+    padding: 8px 14px;
+    font-size: 16px;
+    border-radius: 8px;
+    border: none;
+    background: #0078ff;
+    color: white;
+  }
+
+  button:active {
+    transform: scale(0.97);
+  }
+
+  select, input {
+    width: 100%;
+    padding: 10px;
+    margin-top: 6px;
+    margin-bottom: 10px;
+    font-size: 16px;
+    border-radius: 8px;
+    border: 1px solid #ccc;
+  }
+
+  .income-source {
+    background: #ffffff;
+    padding: 10px;
+    margin-top: 10px;
+    border-radius: 8px;
+    border: 1px solid #ddd;
+  }
+
+  .remove-btn {
+    background: #d9534f;
+    margin-top: 8px;
+    width: 100%;
+  }
+
+  #apply-income-btn {
+    position: sticky;
+    bottom: 10px;
+    width: 100%;
+    padding: 14px;
+    font-size: 18px;
+    background: #28a745;
+  }
+</style>
+</head>
+
+<body>
+
+<h1>Resource Tracker</h1>
+
+<div class="section">
+  <h2>Totals</h2>
+  <div id="totals"></div>
+</div>
+
+<div class="section">
+  <h2>Archetype</h2>
+  <select id="archetype-select" onchange="setArchetype()">
+    <option value="">-- Select Archetype --</option>
+    <option>Architect</option>
+    <option>Cheapskate</option>
+    <option>Cooperative Leader</option>
+    <option>Cultist</option>
+    <option>Elementalist</option>
+    <option>Forge</option>
+    <option>Magic Builder</option>
+    <option>Resource</option>
+    <option>Spontaneous</option>
+  </select>
+</div>
+
+<div class="section">
+  <h2>Add Building</h2>
+
+  <select id="building-select">
+    <option value="">-- Select Building --</option>
+  </select>
+
+  <select id="build-mode">
+    <option value="solo">Solo (+1 to building outputs)</option>
+    <option value="coop">Co-op (custom payment)</option>
+  </select>
+
+  <input id="coop-payment" placeholder="Co-op payment (e.g. B2,P1,O3)">
+  <button onclick="addBuilding()">Add Building</button>
+</div>
+
+<div class="section">
+  <h2>Income Sources</h2>
+
+  <div style="margin-bottom: 12px;">
+    <label><strong>Sort By:</strong></label>
+    <select id="sort-select" onchange="renderIncomeSources()">
+      <option value="none">None</option>
+      <option value="name">Name (A–Z)</option>
+      <option value="B">Sort by B Output</option>
+      <option value="P">Sort by P Output</option>
+      <option value="O">Sort by O Output</option>
+      <option value="A">Sort by A Output</option>
+      <option value="Ad">Sort by Ad Output</option>
+      <option value="R">Sort by Rep Output</option>
+    </select>
+
+    <label><strong>Filter:</strong></label>
+    <select id="filter-select" onchange="renderIncomeSources()">
+      <option value="all">Show All</option>
+      <option value="B">Produces B</option>
+      <option value="P">Produces P</option>
+      <option value="O">Produces O</option>
+      <option value="A">Produces A</option>
+      <option value="Ad">Produces Ad</option>
+      <option value="R">Produces Rep</option>
+    </select>
+  </div>
+
+  <div id="income-list"></div>
+</div>
+
+<button id="apply-income-btn" onclick="applyIncome()">Apply Income</button>
+
+<script>
+const resources = ["B","P","O","A","Ad","R"];
+
+let totals = {B:0,P:0,O:0,A:0,Ad:0,R:0};
+let incomeSources = [];
+let selectedArchetype = null;
+
+const archetypes = {
+  "Architect": ["B","Ad"],
+  "Cheapskate": ["Ad","O"],
+  "Cooperative Leader": ["A","Ad"],
+  "Cultist": ["A","O"],
+  "Elementalist": ["A","P"],
+  "Forge": ["Ad","P"],
+  "Magic Builder": ["A","B"],
+  "Resource": ["B","O"],
+  "Spontaneous": ["O","P"]
+};
+
+const buildings = {
+  "Depot":        { output:{B:1},          cost:{B:2,P:2} },
+  "Mine":         { output:{O:1},          cost:{B:6,P:6} },
+  "Residence":    { output:{P:1},          cost:{B:4,P:4} },
+  "Smith":        { output:{Ad:1},         cost:{B:4,P:6,O:6} },
+  "Carpenter":    { output:{B:4},          cost:{B:6,P:4,O:2,Ad:2} },
+  "Nursery":      { output:{P:4},          cost:{B:4,P:6,O:2,Ad:2} },
+  "School":       { output:{A:3},          cost:{B:4,P:4,O:4,Ad:4} },
+  "Artificer":    { output:{},             cost:{B:10,P:1,A:15,O:5} },
+  "Advanced Forge": { output:{Ad:8},       cost:{B:20,P:10,O:10} },
+  "Seminary":     { output:{P:8},          cost:{B:10,P:20,Ad:10} },
+  "Excavation Site": { output:{B:6,O:6},   cost:{B:10,P:20,Ad:20} },
+  "Magic Apprentice": { output:{A:8},      cost:{B:10,P:5,A:20,Ad:10} }
+};
+
+const select = document.getElementById("building-select");
+Object.keys(buildings).forEach(name => {
+  const opt = document.createElement("option");
+  opt.value = name;
+  opt.textContent = name;
+  select.appendChild(opt);
+});
+
+function renderTotals() {
+  const div = document.getElementById("totals");
+  div.innerHTML = "";
+  resources.forEach(r => {
+    div.innerHTML += `
+      <div class="resource-row">
+        <strong>${r}</strong>
+        <div style="display:flex; gap:8px; align-items:center;">
+          <button onclick="changeTotal('${r}', -1)" style="background:#d9534f;">−</button>
+          <span style="min-width:32px; text-align:center;">${totals[r]}</span>
+          <button onclick="changeTotal('${r}', 1)" style="background:#28a745;">+</button>
+        </div>
+      </div>`;
+  });
+}
+
+function changeTotal(r, amt) {
+  totals[r] += amt;
+  renderTotals();
+}
+
+function setArchetype() {
+  selectedArchetype = document.getElementById("archetype-select").value || null;
+  applyBoostsToAll();
+  renderIncomeSources();
+}
+
+function applyBoostsToAll() {
+  incomeSources.forEach(src => {
+    const base = buildings[src.name].output;
+    resources.forEach(r => {
+      let val = base[r] || 0;
+
+      if (src.solo && base[r] > 0 && r !== "R") val += 1;
+
+      if (selectedArchetype &&
+          archetypes[selectedArchetype].includes(r) &&
+          base[r] > 0 &&
+          r !== "R") {
+        val += 1;
+      }
+
+      if (r === "R") val = 1;
+
+      src.values[r] = val;
+    });
+  });
+}
+
+function parsePayment(str) {
+  const result = {};
+  if (!str) return result;
+  str.split(",").forEach(pair => {
+    const type = pair[0];
+    const num = parseInt(pair.slice(1));
+    if (resources.includes(type)) result[type] = num;
+  });
+  return result;
+}
+
+function addBuilding() {
+  const name = select.value;
+  if (!name) return;
+
+  const mode = document.getElementById("build-mode").value;
+  const coopInput = document.getElementById("coop-payment").value;
+
+  const b = buildings[name];
+  let payment = mode === "solo" ? b.cost : parsePayment(coopInput);
+
+  Object.keys(payment).forEach(r => totals[r] -= payment[r]);
+
+  const source = {
+    id: Date.now(),
+    name,
+    solo: mode === "solo",
+    payment,
+    values: {B:0,P:0,O:0,A:0,Ad:0,R:1}
+  };
+
+  resources.forEach(r => {
+    let val = b.output[r] || 0;
+
+    if (source.solo && b.output[r] > 0 && r !== "R") val += 1;
+
+    if (selectedArchetype &&
+        archetypes[selectedArchetype].includes(r) &&
+        b.output[r] > 0 &&
+        r !== "R") {
+      val += 1;
+    }
+
+    if (r === "R") val = 1;
+
+    source.values[r] = val;
+  });
+
+  incomeSources.push(source);
+  renderTotals();
+  renderIncomeSources();
+}
+
+function removeBuilding(id) {
+  const src = incomeSources.find(s => s.id === id);
+
+  Object.keys(src.payment).forEach(r => totals[r] += 1);
+
+  incomeSources = incomeSources.filter(s => s.id !== id);
+  renderTotals();
+  renderIncomeSources();
+}
+
+function renderIncomeSources() {
+  const div = document.getElementById("income-list");
+  div.innerHTML = "";
+
+  let list = [...incomeSources];
+
+  const filter = document.getElementById("filter-select").value;
+  if (filter !== "all") {
+    list = list.filter(src => src.values[filter] > 0);
+  }
+
+  const sort = document.getElementById("sort-select").value;
+
+  if (sort === "name") {
+    list.sort((a, b) => a.name.localeCompare(b.name));
+  } else if (resources.includes(sort)) {
+    list.sort((a, b) => b.values[sort] - a.values[sort]);
+  }
+
+  list.forEach(src => {
+    let html = `
+      <div class="income-source">
+        <strong>${src.name} (${src.solo ? "Solo" : "Co-op"})</strong>
+    `;
+
+    resources.forEach(r => {
+      html += `
+        <div class="income-row">
+          <span>${r}</span>
+          <span>${src.values[r]}</span>
+        </div>`;
+    });
+
+    html += `
+      <button class="remove-btn" onclick="removeBuilding(${src.id})">Remove</button>
+      </div>
+    `;
+
+    div.innerHTML += html;
+  });
+}
+
+function applyIncome() {
+  incomeSources.forEach(src => {
+    resources.forEach(r => totals[r] += src.values[r]);
+  });
+  renderTotals();
+}
+
+renderTotals();
+</script>
+
+</body>
+</html>
